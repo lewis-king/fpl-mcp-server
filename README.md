@@ -1,5 +1,7 @@
 # FPL MCP Server
 
+Control your Fantasy Premier League team with your favourite LLM to help inform your decisions and gain more contextual insights based on your team
+
 A secure, multi-user Model Context Protocol (MCP) server for Fantasy Premier League.
 
 This server enables LLMs (like Claude) to interact with your FPL squad securely. It uses an "Out-of-Band" authentication flow where credentials are entered into a local web form, meaning your password is **never** shared with the LLM.
