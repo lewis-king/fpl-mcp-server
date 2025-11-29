@@ -22,10 +22,51 @@ class Player(BaseModel):
         super().__init__(**data)
         self.price = self.now_cost / 10
 
+class ElementData(BaseModel):
+    """Player element from bootstrap data"""
+    id: int
+    web_name: str
+    first_name: str
+    second_name: str
+    team: int
+    element_type: int
+    now_cost: int
+    form: str
+    points_per_game: str
+    news: str
+    status: str
+    # Allow extra fields from the API that we don't need to validate
+    class Config:
+        extra = "allow"
+
+class TeamData(BaseModel):
+    """Team data from bootstrap"""
+    id: int
+    name: str
+    short_name: str
+    class Config:
+        extra = "allow"
+
+class ElementTypeData(BaseModel):
+    """Position type data from bootstrap"""
+    id: int
+    singular_name_short: str
+    plural_name_short: str
+    class Config:
+        extra = "allow"
+
+class BootstrapData(BaseModel):
+    """Bootstrap static data structure"""
+    elements: List[ElementData]
+    teams: List[TeamData]
+    element_types: List[ElementTypeData]
+    class Config:
+        extra = "allow"
+
 class TransferPayload(BaseModel):
     chip: Optional[str] = None
     entry: int
     event: int
-    transfers: List[Dict[str, int]] 
+    transfers: List[Dict[str, int]]
     wildcard: bool = False
     freehit: bool = False

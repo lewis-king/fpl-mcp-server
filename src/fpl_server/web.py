@@ -62,7 +62,7 @@ async def submit_login(request_id: str, email: str = Form(...), password: str = 
         
         if token:
             session_id = str(uuid.uuid4())
-            client = FPLClient()
+            client = FPLClient(store=store)
             client.set_api_token(token)
             client.team_id = team_id
             

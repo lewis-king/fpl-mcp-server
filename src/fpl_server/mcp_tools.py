@@ -76,6 +76,37 @@ async def search_players(session_id: str, name_query: str) -> str:
     return "\n".join([f"ID:{p.id} | {p.web_name} ({p.team_name}) | £{p.price}m | Form: {p.form}" for p in matches[:10]])
 
 @mcp.tool()
+async def get_top_players(session_id: str) -> str:
+    """
+    Get top performing players by position (GKP, DEF, MID, FWD) based on points per game.
+    Returns top 3 goalkeepers and top 10 for each outfield position.
+    Requires Session ID.
+    """
+    client = store.get_client(session_id)
+    if not client: return "Error: Invalid/Expired Session ID. Please login_to_fpl."
+    
+    try:
+        top_players = await client.get_top_players_by_position()
+        
+        output = ["**Top Players by Position (Points per Game)**\n"]
+        
+        # Format each position
+        for position, players in top_players.items():
+            if not players:
+                continue
+            output.append(f"\n**{position}:**")
+            for p in players:
+                news_indicator = " ⚠️" if p['news'] else ""
+                output.append(
+                    f"├─ {p['name']} ({p['team']}) - £{p['price']:.1f}m | "
+                    f"PPG: {p['points_per_game']:.1f} | Total: {p['total_points']}{news_indicator}"
+                )
+        
+        return "\n".join(output)
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+@mcp.tool()
 async def make_transfers(session_id: str, ids_out: list[int], ids_in: list[int]) -> str:
     """Execute transfers. IRREVERSIBLE. Requires Session ID."""
     client = store.get_client(session_id)

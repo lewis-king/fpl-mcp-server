@@ -1,7 +1,13 @@
 from typing import Dict, Optional
 from dataclasses import dataclass
 import time
+import json
+import logging
+from pathlib import Path
 from .client import FPLClient
+from .models import BootstrapData
+
+logger = logging.getLogger("fpl_state")
 
 @dataclass
 class PendingLogin:
@@ -17,6 +23,30 @@ class SessionStore:
         
         # Maps session_id (given to LLM) -> Authenticated FPLClient
         self.active_sessions: Dict[str, FPLClient] = {}
+        
+        # Cached bootstrap data loaded at startup
+        self.bootstrap_data: Optional[BootstrapData] = None
+        self._load_bootstrap_data()
+
+    def _load_bootstrap_data(self):
+        """Load bootstrap data from local JSON file"""
+        try:
+            # Find the data file relative to this module
+            current_dir = Path(__file__).parent.parent.parent
+            data_path = current_dir / "data" / "bootsrap_data.json"
+            
+            if not data_path.exists():
+                logger.warning(f"Bootstrap data file not found at {data_path}")
+                return
+            
+            with open(data_path, 'r', encoding='utf-8') as f:
+                raw_data = json.load(f)
+            
+            self.bootstrap_data = BootstrapData(**raw_data)
+            logger.info(f"Loaded {len(self.bootstrap_data.elements)} players from local bootstrap data")
+        except Exception as e:
+            logger.error(f"Failed to load bootstrap data: {e}")
+            self.bootstrap_data = None
 
     def create_login_request(self, request_id: str):
         self.pending_logins[request_id] = PendingLogin(created_at=time.time())
