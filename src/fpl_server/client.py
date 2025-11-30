@@ -25,15 +25,15 @@ class FPLClient:
             token = f"Bearer {token}"
         self.api_token = token
         
-    async def _request(self, method: str, endpoint: str, data: dict = None) -> Any:
+    async def _request(self, method: str, endpoint: str, data: dict = None, params: dict = None) -> Any:
         url = f"{self.BASE_URL}{endpoint}"
         headers = {}
         if self.api_token:
             headers['x-api-authorization'] = self.api_token
-            headers['Authorization'] = self.api_token 
+            headers['Authorization'] = self.api_token
 
         if method == "GET":
-            response = await self.session.get(url, headers=headers)
+            response = await self.session.get(url, headers=headers, params=params)
         else:
             response = await self.session.post(url, json=data, headers=headers)
         
@@ -41,8 +41,79 @@ class FPLClient:
         return response.json()
 
     async def get_bootstrap_data(self) -> Dict[str, Any]:
-        """Fetch fresh bootstrap data from API (used for events/gameweeks)"""
+        """Fetch fresh bootstrap data from API"""
         return await self._request("GET", "bootstrap-static/")
+    
+    async def get_fixtures(self) -> List[Dict[str, Any]]:
+        """Fetch fixtures data from API"""
+        return await self._request("GET", "fixtures/")
+    
+    async def get_element_summary(self, player_id: int) -> Dict[str, Any]:
+        """
+        Fetch detailed player summary including fixtures, history, and past seasons.
+        
+        Args:
+            player_id: The FPL player ID (element ID)
+            
+        Returns:
+            Dictionary containing fixtures, history, and history_past
+        """
+        return await self._request("GET", f"element-summary/{player_id}/")
+    
+    async def get_manager_entry(self, team_id: int) -> Dict[str, Any]:
+        """
+        Fetch FPL manager/team entry information.
+        
+        Args:
+            team_id: The FPL manager's team ID (entry ID)
+            
+        Returns:
+            Dictionary containing manager details, leagues, and team information
+        """
+        return await self._request("GET", f"entry/{team_id}/")
+    
+    async def get_league_standings(
+        self,
+        league_id: int,
+        page_standings: int = 1,
+        page_new_entries: int = 1,
+        phase: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Fetch league standings for a classic league.
+        
+        Args:
+            league_id: The league ID
+            page_standings: Page number for standings (default: 1)
+            page_new_entries: Page number for new entries (default: 1)
+            phase: Phase/season number (default: 1)
+            
+        Returns:
+            Dictionary containing league info and standings with entries
+        """
+        params = {
+            'page_standings': page_standings,
+            'page_new_entries': page_new_entries,
+            'phase': phase
+        }
+        return await self._request(
+            "GET",
+            f"leagues-classic/{league_id}/standings/",
+            params=params
+        )
+    
+    async def get_manager_gameweek_picks(self, team_id: int, gameweek: int) -> Dict[str, Any]:
+        """
+        Fetch a manager's team picks for a specific gameweek.
+        
+        Args:
+            team_id: The FPL manager's team ID (entry ID)
+            gameweek: The gameweek number (event ID)
+            
+        Returns:
+            Dictionary containing picks, automatic subs, and entry history for the gameweek
+        """
+        return await self._request("GET", f"entry/{team_id}/event/{gameweek}/picks/")
 
     async def get_players(self) -> List[Player]:
         """Get all players using cached bootstrap data"""
@@ -109,8 +180,8 @@ class FPLClient:
         
         for element in data.elements:
             # Only include available players
-            if element.status != 'a':
-                continue
+            #if element.status != 'a':
+            #    continue
                 
             position = types.get(element.element_type, 'UNK')
             if position not in players_by_position:
