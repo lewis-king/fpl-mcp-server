@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
 
+def get_project_root() -> Path:
+    """Get the project root directory (where this file's parent's parent is)"""
+    return Path(__file__).parent.parent.parent
+
 class CacheMetadata(BaseModel):
     """Metadata for cached data"""
     last_updated: str  # ISO format timestamp
@@ -37,11 +41,13 @@ class DataCache:
         Initialize the cache manager.
         
         Args:
-            cache_dir: Directory to store cache files
+            cache_dir: Directory to store cache files (relative to project root)
             ttl_hours: Time-to-live in hours (default: 4)
         """
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        # Use absolute path relative to project root
+        project_root = get_project_root()
+        self.cache_dir = project_root / cache_dir
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.ttl_hours = ttl_hours
         self.metadata_suffix = ".meta.json"
     

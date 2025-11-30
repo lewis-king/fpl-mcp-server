@@ -33,9 +33,8 @@ LOGIN_HTML = """
 <body>
     <div class="container">
         <h2>FPL Connection</h2>
-        <p>Enter your credentials to connect your FPL account to the AI Assistant.</p>
+        <p>Enter your FPL credentials. Your entry will be automatically detected.</p>
         <form action="/auth/submit/{request_id}" method="post" onsubmit="showLoader()">
-            <input type="text" name="team_id" placeholder="FPL Team ID (e.g., 123456)" required>
             <input type="email" name="email" placeholder="Email" required>
             <input type="password" name="password" placeholder="Password" required>
             <button type="submit">Secure Login</button>
@@ -55,7 +54,7 @@ async def login_page(request_id: str):
     return LOGIN_HTML.replace("{request_id}", request_id)
 
 @app.post("/auth/submit/{request_id}")
-async def submit_login(request_id: str, email: str = Form(...), password: str = Form(...), team_id: int = Form(...)):
+async def submit_login(request_id: str, email: str = Form(...), password: str = Form(...)):
     try:
         auth = FPLAutomation(email, password)
         token = await auth.login_and_get_token()
@@ -64,8 +63,8 @@ async def submit_login(request_id: str, email: str = Form(...), password: str = 
             session_id = str(uuid.uuid4())
             client = FPLClient(store=store)
             client.set_api_token(token)
-            client.team_id = team_id
             
+            # Entry ID will be fetched automatically from /me endpoint in set_login_success
             await store.set_login_success(request_id, session_id, client)
             return HTMLResponse("""
                 <body style="background:#00ff87; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;">

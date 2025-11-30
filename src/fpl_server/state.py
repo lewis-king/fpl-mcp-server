@@ -205,10 +205,12 @@ class SessionStore:
         """Set login success and fetch user info from /me endpoint"""
         self.active_sessions[session_id] = client
         
-        # Fetch user info after successful login
+        # Fetch user info after successful login and store it in the client
         try:
             user_data = await client.get_me()
-            logger.info(f"Fetched user info for session {session_id}: entry_id={user_data.get('player', {}).get('entry')}")
+            client.user_info = user_data  # Store the user info in the client
+            entry_id = user_data.get('player', {}).get('entry')
+            logger.info(f"Fetched and stored user info for session {session_id}: entry_id={entry_id}")
         except Exception as e:
             logger.error(f"Failed to fetch user info after login: {e}")
         
