@@ -66,7 +66,7 @@ async def submit_login(request_id: str, email: str = Form(...), password: str = 
             client.set_api_token(token)
             client.team_id = team_id
             
-            store.set_login_success(request_id, session_id, client)
+            await store.set_login_success(request_id, session_id, client)
             return HTMLResponse("""
                 <body style="background:#00ff87; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;">
                     <div style="background:white; padding:2rem; border-radius:10px; text-align:center;">

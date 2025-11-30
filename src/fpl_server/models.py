@@ -387,6 +387,25 @@ class PickElement(BaseModel):
     class Config:
         extra = "allow"
 
+# Models for /me endpoint (current user info)
+
+class UserPlayer(BaseModel):
+    """Current user's player information from /me endpoint"""
+    first_name: str
+    last_name: str
+    email: str
+    entry: int  # This is the user's team ID
+    region: int
+    id: int  # Player ID (not team ID)
+    
+    class Config:
+        extra = "allow"
+
+class MeResponse(BaseModel):
+    """Response from /me endpoint"""
+    player: UserPlayer
+    watched: List[Any]
+
 class EntryHistory(BaseModel):
     """Manager's performance for a specific gameweek"""
     event: int

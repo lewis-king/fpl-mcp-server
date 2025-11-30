@@ -54,20 +54,23 @@ Fantasy Premier League is complex. With 20 teams, 600+ players, injuries, form c
 
 ### 🚀 Advanced Capabilities
 
-#### Circular Data Flow
-The server enables **circular exploration** of FPL data:
+#### Circular Data Flow with Friendly Names
+The server enables **natural, circular exploration** of FPL data using friendly names:
 ```
-Your Performance → Leagues → Standings → Competitor Teams → Player Analysis
-     ↓                                           ↓
-  Compare Teams ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ←
+Your Performance → Your Leagues → League Standings → Competitor Teams → Player Analysis
+     ↓                                                      ↓
+  Compare Teams ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ← ←
 ```
 
-Example workflow:
-1. "How am I doing in FPL?" → See your leagues
-2. "Show league 899193 standings" → Find top competitors
-3. "What team did entry 1734732 pick in GW13?" → Analyze their selections
-4. "Compare my team to theirs" → Understand performance differences
-5. "Tell me about Haaland's fixtures" → Research specific players
+Example workflow using **only friendly names**:
+1. "How am I doing?" → Automatically uses your entry, shows your leagues
+2. "Show Greatest Fantasy Footy standings" → Find top competitors by league name
+3. "What team did Jaakko pick in GW13?" → Analyze selections by manager name
+4. "Compare my team to Jaakko's" → Understand performance differences
+5. "Tell me about Haaland's fixtures" → Research players by name
+6. "Compare Salah and Palmer" → Direct player comparison by names
+
+**No IDs needed anywhere!** The system resolves all names internally.
 
 #### Smart Caching
 - **4-Hour TTL** - Bootstrap and fixtures data cached locally
@@ -165,97 +168,135 @@ Quit Claude completely and reopen. Look for the 🔌 plug icon in the input bar.
 
 ## 💡 Usage Examples
 
+### 🎯 Natural Conversation Flow
+
+The server uses **friendly names** instead of IDs, enabling natural conversations:
+
 ### Getting Started
 ```
 You: "Log me into FPL"
 Claude: [Provides secure login link]
 You: [Click link, enter credentials, confirm]
 You: "I'm done"
-Claude: "Authentication successful!"
+Claude: "✅ Authentication successful! Your session is now active."
 ```
 
-### Your Team
+### Your Team & Performance
 ```
 "Show my current team and bank balance"
-"What's my overall rank and points?"
-"How am I doing in my leagues?"
+"How am I doing?"  → Automatically uses your entry
+"What leagues am I in?"
+"Show me my performance"
 ```
 
-### Player Research
+### Player Research (Use Names, Not IDs!)
 ```
 "Find me the top midfielders by form"
-"Compare Salah and Palmer"
+"Compare Salah and Palmer"  → Just use player names!
 "Is Haaland injured?"
 "Show me Saka's upcoming fixtures"
-"What are Arsenal's next 5 fixtures?"
+"Tell me about Mohamed Salah"  → Fuzzy matching handles variations
 ```
 
-### Competitive Analysis
+### Competitive Analysis (Use Friendly Names!)
 ```
-"Show me the standings for league 899193"
-"What team did entry 1734732 pick in gameweek 13?"
-"Compare my team to the league leader's team"
-"Who did the top 3 managers captain this week?"
+"Show me the standings for Greatest Fantasy Footy"  → Use league name!
+"What team did Jaakko pick in gameweek 13?"  → Use manager name!
+"Tell me about Lewis's team in Greatest Fantasy Footy"
+"Compare Jaakko and Lewis in Greatest Fantasy Footy for gameweek 13"
+"Who did the top managers in my league captain this week?"
+```
+
+### Team & Fixture Analysis (Use Team Names!)
+```
+"What are Arsenal's next 5 fixtures?"  → Just use team name!
+"Show me Liverpool's fixture difficulty"
+"Which teams have the best fixtures?"
+"Show me all fixtures for gameweek 14"
 ```
 
 ### Strategic Planning
 ```
-"Which teams have the best fixtures in the next 5 gameweeks?"
-"Show me all fixtures for gameweek 14"
 "Find players to avoid due to injuries"
+"Is Salah available to play?"  → Check specific player
 "Suggest transfers for next gameweek"
+"Compare Haaland and Watkins"  → Direct name comparison
 ```
 
 ### Advanced Analysis
 ```
-"Analyze why the league leader is beating me"
-"Find differential picks that top managers are using"
+"Analyze why Jaakko is beating me in Greatest Fantasy Footy"
+"Find differential picks in my league"
 "Which premium midfielder has the best value?"
-"Compare the fixture difficulty for Liverpool vs Man City assets"
+"Compare Arsenal and Man City players"
 ```
+
+### 🔑 Key Principle: No IDs Needed!
+
+**Old way (❌):**
+```
+"Show league 899193 standings"
+"What team did entry 1734732 pick?"
+"Compare players 354 and 427"
+```
+
+**New way (✅):**
+```
+"Show Greatest Fantasy Footy standings"
+"What team did Jaakko pick?"
+"Compare Salah and Palmer"
+```
+
+The system automatically:
+- Fetches your entry ID after login
+- Resolves league names from your leagues
+- Finds managers by name within leagues
+- Matches player names with fuzzy search
+- Converts team names to IDs internally
 
 ## 🛠️ Available Tools
 
-The server provides **30+ MCP tools** organized by category:
+The server provides **30+ MCP tools** organized by category. All tools use **friendly names** instead of IDs!
 
 ### Authentication
 - `login_to_fpl` - Generate secure login link
-- `check_login_status` - Verify authentication
+- `check_login_status` - Verify authentication and activate session
 
-### Team Management
-- `get_my_squad` - View current team
-- `make_transfers` - Execute transfers (irreversible!)
-- `get_my_fpl_performance` - Your stats and rankings
+### Your Account
+- `get_my_info` - View your account, entry, and leagues
+- `get_my_squad` - View your current team
+- `get_my_performance` - Your stats, ranks, and league positions
+- `make_transfers` - Execute transfers using player names (irreversible!)
 
-### Player Research
-- `search_players` - Find players by name
-- `find_player` - Intelligent fuzzy search
-- `get_player_details` - Detailed player info
-- `get_player_summary` - Comprehensive analysis with fixtures
-- `compare_players` - Side-by-side comparison
-- `get_top_players` - Best performers by position
-- `search_players_by_team` - Team squad browser
+### Player Research (Use Player Names!)
+- `search_players(name_query)` - Find players by name
+- `find_player(player_name)` - Intelligent fuzzy search with full details
+- `get_player_details(player_name)` - Detailed player info by name
+- `get_player_summary(player_name)` - Comprehensive analysis with fixtures
+- `compare_players(player_names)` - Side-by-side comparison using names
+- `get_top_players()` - Best performers by position
+- `search_players_by_team(team_name)` - Browse team squads by name
 
 ### Injury & Availability
-- `get_injury_and_lineup_predictions` - RotoWire lineup data
-- `get_players_to_avoid` - Injury risk assessment
-- `check_player_availability` - Individual player status
+- `get_injury_and_lineup_predictions()` - RotoWire lineup data
+- `get_players_to_avoid()` - Injury risk assessment
+- `check_player_availability(player_name)` - Check specific player status
 
-### Fixtures & Teams
-- `get_fixtures_for_gameweek` - All matches in a gameweek
-- `analyze_team_fixtures` - Fixture difficulty analysis
-- `get_team_info` - Team strength ratings
-- `list_all_teams` - All Premier League teams
+### Fixtures & Teams (Use Team Names!)
+- `get_fixtures_for_gameweek(gameweek)` - All matches in a gameweek
+- `analyze_team_fixtures(team_name, num_gameweeks)` - Fixture difficulty by team name
+- `get_team_info(team_name)` - Team strength ratings by name
+- `list_all_teams()` - All Premier League teams
 
 ### Gameweek Information
-- `get_current_gameweek` - Current/upcoming gameweek
-- `get_gameweek_info` - Detailed gameweek stats
-- `list_all_gameweeks` - Season overview
+- `get_current_gameweek()` - Current/upcoming gameweek
+- `get_gameweek_info(gameweek_number)` - Detailed gameweek stats
+- `list_all_gameweeks()` - Season overview
 
-### Competitive Analysis
-- `get_league_standings` - League rankings
-- `get_manager_gameweek_team` - Inspect competitor teams
-- `compare_managers` - Multi-manager comparison
+### Competitive Analysis (Use Friendly Names!)
+- `get_league_standings(league_name, page)` - League rankings by league name
+- `get_manager_gameweek_team(manager_name, league_name, gameweek)` - Inspect teams by manager name
+- `compare_managers(manager_names, league_name, gameweek)` - Multi-manager comparison by names
 
 ## 🏗️ Architecture
 

@@ -18,6 +18,7 @@ class FPLClient:
         )
         self.api_token = None
         self.team_id: Optional[int] = None
+        self.user_info: Optional[Dict[str, Any]] = None  # Store user info from /me
         self._store = store
 
     def set_api_token(self, token: str):
@@ -114,6 +115,16 @@ class FPLClient:
             Dictionary containing picks, automatic subs, and entry history for the gameweek
         """
         return await self._request("GET", f"entry/{team_id}/event/{gameweek}/picks/")
+    
+    async def get_me(self) -> Dict[str, Any]:
+        """
+        Fetch current user's information including their entry ID.
+        This is called after authentication to get the user's team ID.
+        
+        Returns:
+            Dictionary containing player info with entry ID
+        """
+        return await self._request("GET", "me/")
 
     async def get_players(self) -> List[Player]:
         """Get all players using cached bootstrap data"""

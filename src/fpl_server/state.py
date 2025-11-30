@@ -201,8 +201,17 @@ class SessionStore:
     def create_login_request(self, request_id: str):
         self.pending_logins[request_id] = PendingLogin(created_at=time.time())
 
-    def set_login_success(self, request_id: str, session_id: str, client: FPLClient):
+    async def set_login_success(self, request_id: str, session_id: str, client: FPLClient):
+        """Set login success and fetch user info from /me endpoint"""
         self.active_sessions[session_id] = client
+        
+        # Fetch user info after successful login
+        try:
+            user_data = await client.get_me()
+            logger.info(f"Fetched user info for session {session_id}: entry_id={user_data.get('player', {}).get('entry')}")
+        except Exception as e:
+            logger.error(f"Failed to fetch user info after login: {e}")
+        
         if request_id in self.pending_logins:
             self.pending_logins[request_id].status = "success"
             self.pending_logins[request_id].session_id = session_id
@@ -374,6 +383,114 @@ class SessionStore:
         if player:
             return player.web_name
         return f"Unknown Player (ID: {element_id})"
+    
+    async def find_league_by_name(self, client: FPLClient, league_name: str) -> Optional[dict]:
+        """
+        Find a league by name from the user's leagues.
+        
+        Args:
+            client: The authenticated FPL client
+            league_name: The name of the league to find
+            
+        Returns:
+            League dict with 'id' and 'name' if found, None otherwise
+        """
+        if not client.user_info:
+            return None
+        
+        # Get all leagues the user is in
+        classic_leagues = client.user_info.get('leagues', {}).get('classic', [])
+        
+        # Normalize search name
+        normalized_search = self._normalize_name(league_name)
+        
+        # Try exact match first
+        for league in classic_leagues:
+            if self._normalize_name(league.get('name', '')) == normalized_search:
+                return {
+                    'id': league.get('id'),
+                    'name': league.get('name')
+                }
+        
+        # Try substring match
+        for league in classic_leagues:
+            league_norm = self._normalize_name(league.get('name', ''))
+            if normalized_search in league_norm or league_norm in normalized_search:
+                return {
+                    'id': league.get('id'),
+                    'name': league.get('name')
+                }
+        
+        return None
+    
+    async def find_manager_by_name(self, client: FPLClient, league_id: int, manager_name: str) -> Optional[dict]:
+        """
+        Find a manager by name in a league's standings.
+        
+        Args:
+            client: The authenticated FPL client
+            league_id: The league ID to search in
+            manager_name: The manager's name to find
+            
+        Returns:
+            Manager dict with 'entry', 'entry_name', 'player_name' if found, None otherwise
+        """
+        try:
+            standings = await client.get_league_standings(league_id)
+            
+            # Normalize search name
+            normalized_search = self._normalize_name(manager_name)
+            
+            # Search through standings
+            for result in standings.standings.results:
+                # Try matching against player_name (manager name)
+                if self._normalize_name(result.player_name) == normalized_search:
+                    return {
+                        'entry': result.entry,
+                        'entry_name': result.entry_name,
+                        'player_name': result.player_name
+                    }
+                
+                # Try matching against entry_name (team name)
+                if self._normalize_name(result.entry_name) == normalized_search:
+                    return {
+                        'entry': result.entry,
+                        'entry_name': result.entry_name,
+                        'player_name': result.player_name
+                    }
+            
+            # Try substring matches
+            for result in standings.standings.results:
+                player_norm = self._normalize_name(result.player_name)
+                entry_norm = self._normalize_name(result.entry_name)
+                
+                if (normalized_search in player_norm or player_norm in normalized_search or
+                    normalized_search in entry_norm or entry_norm in normalized_search):
+                    return {
+                        'entry': result.entry,
+                        'entry_name': result.entry_name,
+                        'player_name': result.player_name
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding manager by name: {e}")
+            return None
+    
+    def get_user_entry_id(self, client: FPLClient) -> Optional[int]:
+        """
+        Get the user's entry ID from their stored user info.
+        
+        Args:
+            client: The authenticated FPL client
+            
+        Returns:
+            The user's entry ID or None if not available
+        """
+        if not client.user_info:
+            return None
+        return client.user_info.get('player', {}).get('entry')
 
 # Global Instance
 store = SessionStore()
