@@ -51,46 +51,26 @@ class SessionStore:
     def _load_bootstrap_data(self):
         """Load bootstrap data from cache or fetch from API if expired"""
         try:
-            # Check if cache is valid
-            if not self.cache.is_expired("bootstrap_data.json"):
-                logger.info("Loading bootstrap data from cache")
-                raw_data = self.cache.get("bootstrap_data.json")
-                if raw_data:
-                    self.bootstrap_data = BootstrapData(**raw_data)
-                    self._build_player_indices()
-                    logger.info(
-                        f"Loaded {len(self.bootstrap_data.elements)} players from cache. "
-                        f"Cache info: {self.cache.get_cache_info('bootstrap_data.json')}"
-                    )
-                    return
-            
-            # Cache is expired or missing, try to fetch from API
-            logger.info("Bootstrap cache expired or missing, fetching from API...")
-            try:
-                # Create a temporary client to fetch data
-                temp_client = FPLClient()
-                raw_data = asyncio.run(temp_client.get_bootstrap_data())
-                asyncio.run(temp_client.close())
-                
-                # Save to cache
-                self.cache.set("bootstrap_data.json", raw_data)
-                logger.info("Bootstrap data fetched from API and cached")
-                
+            # Always try to load from cache first (even if expired)
+            raw_data = self.cache.get("bootstrap_data.json", ignore_expiry=True)
+            if raw_data:
                 self.bootstrap_data = BootstrapData(**raw_data)
                 self._build_player_indices()
+                cache_info = self.cache.get_cache_info('bootstrap_data.json')
+                logger.info(
+                    f"Loaded {len(self.bootstrap_data.elements)} players from cache. "
+                    f"Cache info: {cache_info}"
+                )
+                
+                # If cache is expired, log a warning but continue using it
+                if self.cache.is_expired("bootstrap_data.json"):
+                    logger.warning("Bootstrap cache is expired but will be used. Consider refreshing.")
+                
                 return
-            except Exception as api_error:
-                logger.error(f"Failed to fetch bootstrap data from API: {api_error}")
-                
-                # Fallback to expired cache if available
-                raw_data = self.cache.get("bootstrap_data.json")
-                if raw_data:
-                    logger.warning("Using expired cache as fallback")
-                    self.bootstrap_data = BootstrapData(**raw_data)
-                    self._build_player_indices()
-                    return
-                
-                raise
+            
+            # No cache available at all - this is a problem
+            logger.error("No bootstrap cache found. Please run the server to populate cache.")
+            self.bootstrap_data = None
                 
         except Exception as e:
             logger.error(f"Failed to load bootstrap data: {e}")
@@ -156,43 +136,25 @@ class SessionStore:
     def _load_fixtures_data(self):
         """Load fixtures data from cache or fetch from API if expired"""
         try:
-            # Check if cache is valid
-            if not self.cache.is_expired("fixtures.json"):
-                logger.info("Loading fixtures data from cache")
-                raw_data = self.cache.get("fixtures.json")
-                if raw_data:
-                    self.fixtures_data = [FixtureData(**fixture) for fixture in raw_data]
-                    logger.info(
-                        f"Loaded {len(self.fixtures_data)} fixtures from cache. "
-                        f"Cache info: {self.cache.get_cache_info('fixtures.json')}"
-                    )
-                    return
-            
-            # Cache is expired or missing, try to fetch from API
-            logger.info("Fixtures cache expired or missing, fetching from API...")
-            try:
-                # Create a temporary client to fetch data
-                temp_client = FPLClient()
-                raw_data = asyncio.run(temp_client.get_fixtures())
-                asyncio.run(temp_client.close())
-                
-                # Save to cache
-                self.cache.set("fixtures.json", raw_data)
-                logger.info("Fixtures data fetched from API and cached")
-                
+            # Always try to load from cache first (even if expired)
+            raw_data = self.cache.get("fixtures.json", ignore_expiry=True)
+            if raw_data:
                 self.fixtures_data = [FixtureData(**fixture) for fixture in raw_data]
+                cache_info = self.cache.get_cache_info('fixtures.json')
+                logger.info(
+                    f"Loaded {len(self.fixtures_data)} fixtures from cache. "
+                    f"Cache info: {cache_info}"
+                )
+                
+                # If cache is expired, log a warning but continue using it
+                if self.cache.is_expired("fixtures.json"):
+                    logger.warning("Fixtures cache is expired but will be used. Consider refreshing.")
+                
                 return
-            except Exception as api_error:
-                logger.error(f"Failed to fetch fixtures data from API: {api_error}")
-                
-                # Fallback to expired cache if available
-                raw_data = self.cache.get("fixtures.json")
-                if raw_data:
-                    logger.warning("Using expired fixtures cache as fallback")
-                    self.fixtures_data = [FixtureData(**fixture) for fixture in raw_data]
-                    return
-                
-                raise
+            
+            # No cache available at all - this is a problem
+            logger.error("No fixtures cache found. Please run the server to populate cache.")
+            self.fixtures_data = None
                 
         except Exception as e:
             logger.error(f"Failed to load fixtures data: {e}")

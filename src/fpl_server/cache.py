@@ -102,20 +102,24 @@ class DataCache:
         
         return metadata.is_expired()
     
-    def get(self, cache_file: str) -> Optional[Any]:
+    def get(self, cache_file: str, ignore_expiry: bool = False) -> Optional[Any]:
         """
-        Get cached data if it exists and hasn't expired.
+        Get cached data if it exists.
         
         Args:
             cache_file: Name of the cache file
+            ignore_expiry: If True, return data even if expired
             
         Returns:
-            Cached data or None if expired/missing
+            Cached data or None if missing
         """
-        if self.is_expired(cache_file):
+        if not ignore_expiry and self.is_expired(cache_file):
             return None
         
         data_path = self._get_data_path(cache_file)
+        if not data_path.exists():
+            return None
+            
         try:
             with open(data_path, 'r') as f:
                 return json.load(f)
