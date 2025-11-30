@@ -164,7 +164,7 @@ Add the FPL server (replace `/ABSOLUTE/PATH/TO/fpl-mcp-server` with your path):
 
 #### Restart Claude
 
-Quit Claude completely and reopen. Look for the 🔌 plug icon in the input bar.
+Quit Claude completely and reopen. An error notification popup will appear if something is wrong with connecting the MCP server. If not error, this is a good sign, but go to settings and check connectors to confirm fpl-mcp-server is listed there.
 
 ## 💡 Usage Examples
 
@@ -231,16 +231,8 @@ Claude: "✅ Authentication successful! Your session is now active."
 "Compare Arsenal and Man City players"
 ```
 
-### 🔑 Key Principle: No IDs Needed!
+### 🔑 Key Principle: Names over IDs
 
-**Old way (❌):**
-```
-"Show league 899193 standings"
-"What team did entry 1734732 pick?"
-"Compare players 354 and 427"
-```
-
-**New way (✅):**
 ```
 "Show Greatest Fantasy Footy standings"
 "What team did Jaakko pick?"
@@ -374,7 +366,7 @@ Contributions are welcome! Areas for improvement:
 
 ## 🙏 Acknowledgments
 
-- Fantasy Premier League for the excellent API
+- Fantasy Premier League for API
 - RotoWire for injury and lineup data
 - The MCP community for the protocol
 - Claude for AI capabilities
