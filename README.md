@@ -354,6 +354,7 @@ The server provides **30+ MCP tools** organized by category. All tools use **fri
 
 Contributions are welcome! Areas for improvement:
 
+- add understat and/or fbref stats to add better technical analysis to player data
 - Additional MCP tools for more FPL features
 - Enhanced fixture difficulty algorithms
 - Historical data analysis tools
