@@ -1,0 +1,13 @@
+__pycache__
+*.py[cod]
+*.pyo
+*.pyd
+*.db
+*.sqlite
+*.log
+*.pot
+*.pyc
+*.pdb
+*.egg-info/
+dist/
+build/

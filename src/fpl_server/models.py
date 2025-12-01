@@ -432,3 +432,41 @@ class GameweekPicks(BaseModel):
     
     class Config:
         extra = "allow"
+
+# Models for my-team endpoint (includes chips and transfers)
+
+class ChipData(BaseModel):
+    """Chip information from my-team endpoint"""
+    id: int
+    status_for_entry: str  # "available", "played", "unavailable"
+    played_by_entry: List[int]  # List of gameweeks where chip was played
+    name: str  # "wildcard", "freehit", "bboost", "3xc"
+    number: int  # Chip number (1 or 2 for first/second half)
+    start_event: int  # First gameweek chip can be used
+    stop_event: int  # Last gameweek chip can be used
+    chip_type: str  # "team" or "transfer"
+    is_pending: bool
+    
+    class Config:
+        extra = "allow"
+
+class TransfersData(BaseModel):
+    """Transfer information from my-team endpoint"""
+    cost: int  # Points cost for transfers
+    status: str  # "cost" or other status
+    limit: int  # Maximum number of free transfers that can accumulate
+    made: int  # Number of transfers made this gameweek
+    bank: int  # Money in bank (in tenths, divide by 10 for actual value)
+    value: int  # Total squad value (in tenths, divide by 10 for actual value)
+    
+    class Config:
+        extra = "allow"
+
+class MyTeamResponse(BaseModel):
+    """Complete response from my-team endpoint"""
+    picks: List[PickElement]
+    chips: List[ChipData]
+    transfers: TransfersData
+    
+    class Config:
+        extra = "allow"

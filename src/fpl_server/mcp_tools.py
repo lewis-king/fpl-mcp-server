@@ -102,7 +102,7 @@ async def get_my_info() -> str:
 
 @mcp.tool()
 async def get_my_squad() -> str:
-    """Get your current team squad and bank balance."""
+    """Get your current team squad, chips status, and transfer information."""
     client = _get_client()
     if not client: return "Error: Not authenticated. Please use login_to_fpl first."
     
@@ -115,13 +115,54 @@ async def get_my_squad() -> str:
         all_players = await client.get_players()
         p_map = {p.id: p for p in all_players}
         
-        bank = my_team['transfers']['bank'] / 10
-        output = [f"**My Team (Bank: £{bank}m)**"]
+        # Transfer info
+        transfers = my_team['transfers']
+        bank = transfers['bank'] / 10
+        free_transfers = transfers['limit'] - transfers['made']
+        transfer_cost = transfers['cost']
+        squad_value = transfers['value'] / 10
         
-        for pick in my_team['picks']:
+        output = [
+            f"**My Team**",
+            f"Squad Value: £{squad_value:.1f}m | Bank: £{bank:.1f}m",
+            f"Free Transfers: {free_transfers} | Transfer Cost: {transfer_cost} pts",
+            ""
+        ]
+        
+        # Chips info
+        chips = my_team.get('chips', [])
+        if chips:
+            available_chips = [c for c in chips if c['status_for_entry'] == 'available']
+            played_chips = [c for c in chips if c['status_for_entry'] == 'played']
+            
+            if available_chips:
+                chip_icons = {
+                    'bboost': '📊',
+                    'freehit': '🎯',
+                    '3xc': '⭐',
+                    'wildcard': '🃏'
+                }
+                chips_str = ', '.join([f"{chip_icons.get(c['name'], '🎴')} {c['name'].upper()}" for c in available_chips])
+                output.append(f"**Available Chips:** {chips_str}")
+            
+            if played_chips:
+                output.append(f"**Played Chips:** {', '.join([c['name'].upper() for c in played_chips])}")
+            
+            output.append("")
+        
+        # Squad
+        output.append("**Starting XI:**")
+        starting = [p for p in my_team['picks'] if p['position'] <= 11]
+        for pick in starting:
             p = p_map.get(pick['element'])
             role = " (C)" if pick['is_captain'] else " (VC)" if pick['is_vice_captain'] else ""
-            output.append(f"- {p.web_name} ({p.team_name}): £{pick['selling_price']/10}m {role}")
+            output.append(f"{pick['position']:2d}. {p.web_name} ({p.team_name}): £{pick['selling_price']/10:.1f}m{role}")
+        
+        output.append("\n**Bench:**")
+        bench = [p for p in my_team['picks'] if p['position'] > 11]
+        for pick in bench:
+            p = p_map.get(pick['element'])
+            output.append(f"{pick['position']:2d}. {p.web_name} ({p.team_name}): £{pick['selling_price']/10:.1f}m")
             
         return "\n".join(output)
     except Exception as e:
@@ -1708,3 +1749,579 @@ async def analyze_team_fixtures(team_name: str, num_gameweeks: int = 5) -> str:
         return "\n".join(output)
     except Exception as e:
         return f"Error analyzing fixtures: {str(e)}"
+
+@mcp.tool()
+async def recommend_chip_strategy() -> str:
+    """
+    Analyze your available chips and recommend optimal timing based on upcoming fixtures.
+    Considers double gameweeks, blank gameweeks, and fixture difficulty to suggest when to play each chip.
+    """
+    client = _get_client()
+    if not client: return "Error: Not authenticated. Please use login_to_fpl first."
+    
+    try:
+        entry_id = store.get_user_entry_id(client)
+        if not entry_id:
+            return "Error: Could not determine your entry ID."
+        
+        my_team = await client.get_my_team(entry_id)
+        chips = my_team.get('chips', [])
+        
+        if not chips:
+            return "Error: Chip data not available."
+        
+        available_chips = [c for c in chips if c['status_for_entry'] == 'available']
+        
+        if not available_chips:
+            return "✅ All chips have been played! No chip strategy needed."
+        
+        # Get current gameweek
+        current_gw = store.get_current_gameweek()
+        if not current_gw:
+            return "Error: Could not determine current gameweek."
+        
+        current_gw_id = current_gw.id
+        
+        # Analyze next 10 gameweeks for DGW/BGW
+        fixtures_ahead = []
+        for gw_num in range(current_gw_id, min(current_gw_id + 10, 39)):
+            gw_fixtures = [f for f in store.fixtures_data if f.event == gw_num]
+            
+            # Count teams playing
+            teams_playing = set()
+            team_fixture_count = {}
+            
+            for fixture in gw_fixtures:
+                teams_playing.add(fixture.team_h)
+                teams_playing.add(fixture.team_a)
+                team_fixture_count[fixture.team_h] = team_fixture_count.get(fixture.team_h, 0) + 1
+                team_fixture_count[fixture.team_a] = team_fixture_count.get(fixture.team_a, 0) + 1
+            
+            # Detect DGW (teams playing twice)
+            dgw_teams = [tid for tid, count in team_fixture_count.items() if count >= 2]
+            
+            # Detect BGW (less than 60% of teams playing)
+            total_teams = len(store.bootstrap_data.teams) if store.bootstrap_data else 20
+            is_bgw = len(teams_playing) < (total_teams * 0.6)
+            
+            fixtures_ahead.append({
+                'gw': gw_num,
+                'teams_playing': len(teams_playing),
+                'dgw_teams': dgw_teams,
+                'is_dgw': len(dgw_teams) > 0,
+                'is_bgw': is_bgw,
+                'fixtures': gw_fixtures
+            })
+        
+        output = [
+            "**Chip Strategy Recommendations**\n",
+            f"Current Gameweek: {current_gw_id}",
+            f"Available Chips: {', '.join([c['name'].upper() for c in available_chips])}\n"
+        ]
+        
+        # Analyze each available chip
+        chip_recommendations = []
+        
+        for chip in available_chips:
+            chip_name = chip['name']
+            chip_type = chip.get('chip_type', 'unknown')
+            play_time = chip.get('play_time_type', 'unknown')
+            
+            if chip_name == 'wildcard':
+                # Wildcard strategy
+                rec = {
+                    'chip': '🃏 WILDCARD',
+                    'priority': 'MEDIUM',
+                    'recommendations': []
+                }
+                
+                # Check for DGW in next 5 gameweeks
+                upcoming_dgws = [fw for fw in fixtures_ahead[:5] if fw['is_dgw']]
+                
+                if upcoming_dgws:
+                    next_dgw = upcoming_dgws[0]
+                    rec['recommendations'].append(
+                        f"Consider using 1 GW before GW{next_dgw['gw']} (DGW with {len(next_dgw['dgw_teams'])} teams)"
+                    )
+                    rec['priority'] = 'HIGH'
+                else:
+                    rec['recommendations'].append(
+                        "No immediate DGW detected. Use when you need major squad overhaul"
+                    )
+                
+                # Check squad health
+                picks = my_team['picks']
+                all_players = await client.get_players()
+                p_map = {p.id: p for p in all_players}
+                
+                injured_count = sum(1 for pick in picks if p_map.get(pick['element']) and p_map[pick['element']].status != 'a')
+                
+                if injured_count >= 3:
+                    rec['recommendations'].append(f"⚠️ {injured_count} players unavailable - consider using soon")
+                    rec['priority'] = 'HIGH'
+                
+                rec['recommendations'].append(
+                    "💡 Pro tip: Use before a DGW to maximize new players' potential"
+                )
+                
+                chip_recommendations.append(rec)
+            
+            elif chip_name == 'freehit':
+                # Free Hit strategy
+                rec = {
+                    'chip': '🎯 FREE HIT',
+                    'priority': 'LOW',
+                    'recommendations': []
+                }
+                
+                # Check for BGW
+                upcoming_bgws = [fw for fw in fixtures_ahead[:8] if fw['is_bgw']]
+                
+                if upcoming_bgws:
+                    next_bgw = upcoming_bgws[0]
+                    rec['recommendations'].append(
+                        f"🎯 SAVE for GW{next_bgw['gw']} (BGW - only {next_bgw['teams_playing']} teams playing)"
+                    )
+                    rec['priority'] = 'HIGH' if next_bgw['gw'] - current_gw_id <= 3 else 'MEDIUM'
+                else:
+                    # Check for DGW as backup
+                    upcoming_dgws = [fw for fw in fixtures_ahead[:8] if fw['is_dgw']]
+                    if upcoming_dgws:
+                        next_dgw = upcoming_dgws[0]
+                        rec['recommendations'].append(
+                            f"Consider GW{next_dgw['gw']} (DGW) if no BGW expected"
+                        )
+                    else:
+                        rec['recommendations'].append(
+                            "No BGW or DGW detected. Save for emergency or late-season BGW"
+                        )
+                
+                rec['recommendations'].append(
+                    "💡 Pro tip: Best used in blank gameweeks when few teams play"
+                )
+                
+                chip_recommendations.append(rec)
+            
+            elif chip_name == '3xc':
+                # Triple Captain strategy
+                rec = {
+                    'chip': '⭐ TRIPLE CAPTAIN',
+                    'priority': 'MEDIUM',
+                    'recommendations': []
+                }
+                
+                # Find premium players in squad
+                picks = my_team['picks']
+                all_players = await client.get_players()
+                p_map = {p.id: p for p in all_players}
+                
+                premium_players = []
+                for pick in picks:
+                    player = p_map.get(pick['element'])
+                    if player and player.now_cost >= 90:  # £9m+
+                        premium_players.append({
+                            'player': player,
+                            'pick': pick
+                        })
+                
+                if not premium_players:
+                    rec['recommendations'].append("⚠️ No premium players (£9m+) in squad")
+                    rec['priority'] = 'LOW'
+                else:
+                    # Check their upcoming fixtures
+                    best_candidates = []
+                    
+                    for pp in premium_players:
+                        player = pp['player']
+                        
+                        # Check next 5 fixtures
+                        player_fixtures = []
+                        for fw in fixtures_ahead[:5]:
+                            for fixture in fw['fixtures']:
+                                if fixture.team_h == player.team or fixture.team_a == player.team:
+                                    is_home = fixture.team_h == player.team
+                                    difficulty = fixture.team_h_difficulty if is_home else fixture.team_a_difficulty
+                                    
+                                    player_fixtures.append({
+                                        'gw': fw['gw'],
+                                        'is_dgw': player.team in fw['dgw_teams'],
+                                        'difficulty': difficulty,
+                                        'is_home': is_home
+                                    })
+                        
+                        # Score the player
+                        score = 0
+                        best_gw = None
+                        
+                        for pf in player_fixtures:
+                            gw_score = 0
+                            if pf['is_dgw']:
+                                gw_score += 50  # DGW is huge
+                            gw_score += (6 - pf['difficulty']) * 10  # Easier fixtures better
+                            if pf['is_home']:
+                                gw_score += 5
+                            
+                            # Add form bonus
+                            try:
+                                form_score = float(player.form) * 5
+                                gw_score += form_score
+                            except:
+                                pass
+                            
+                            if gw_score > score:
+                                score = gw_score
+                                best_gw = pf['gw']
+                        
+                        if best_gw:
+                            best_candidates.append({
+                                'player': player,
+                                'score': score,
+                                'best_gw': best_gw,
+                                'has_dgw': any(pf['is_dgw'] for pf in player_fixtures)
+                            })
+                    
+                    if best_candidates:
+                        best_candidates.sort(key=lambda x: x['score'], reverse=True)
+                        top_candidate = best_candidates[0]
+                        
+                        if top_candidate['has_dgw']:
+                            rec['recommendations'].append(
+                                f"🌟 STRONG: Use on {top_candidate['player'].web_name} in GW{top_candidate['best_gw']} (DGW)"
+                            )
+                            rec['priority'] = 'HIGH'
+                        else:
+                            rec['recommendations'].append(
+                                f"Consider {top_candidate['player'].web_name} in GW{top_candidate['best_gw']} (good fixtures)"
+                            )
+                    else:
+                        rec['recommendations'].append("Wait for better fixture opportunities")
+                
+                rec['recommendations'].append(
+                    "💡 Pro tip: Best used on premium players in double gameweeks"
+                )
+                
+                chip_recommendations.append(rec)
+            
+            elif chip_name == 'bboost':
+                # Bench Boost strategy
+                rec = {
+                    'chip': '📊 BENCH BOOST',
+                    'priority': 'LOW',
+                    'recommendations': []
+                }
+                
+                # Analyze bench quality
+                picks = my_team['picks']
+                all_players = await client.get_players()
+                p_map = {p.id: p for p in all_players}
+                
+                bench_picks = [p for p in picks if p['position'] > 11]
+                bench_quality = []
+                
+                for pick in bench_picks:
+                    player = p_map.get(pick['element'])
+                    if player:
+                        try:
+                            minutes = int(player.minutes) if hasattr(player, 'minutes') else 0
+                            bench_quality.append({
+                                'player': player,
+                                'minutes': minutes,
+                                'ppg': float(player.points_per_game) if player.points_per_game else 0
+                            })
+                        except:
+                            pass
+                
+                avg_bench_minutes = sum(b['minutes'] for b in bench_quality) / len(bench_quality) if bench_quality else 0
+                
+                if avg_bench_minutes < 300:  # Less than ~3.5 games worth
+                    rec['recommendations'].append(
+                        f"⚠️ Weak bench (avg {avg_bench_minutes:.0f} mins) - improve before using"
+                    )
+                    rec['priority'] = 'LOW'
+                else:
+                    # Check for DGW
+                    upcoming_dgws = [fw for fw in fixtures_ahead[:6] if fw['is_dgw']]
+                    
+                    if upcoming_dgws:
+                        # Check if bench players have DGW
+                        bench_dgw_count = 0
+                        for bq in bench_quality:
+                            for fw in upcoming_dgws:
+                                if bq['player'].team in fw['dgw_teams']:
+                                    bench_dgw_count += 1
+                                    break
+                        
+                        if bench_dgw_count >= 2:
+                            best_dgw = upcoming_dgws[0]
+                            rec['recommendations'].append(
+                                f"🎯 STRONG: Use in GW{best_dgw['gw']} ({bench_dgw_count} bench players have DGW)"
+                            )
+                            rec['priority'] = 'HIGH'
+                        else:
+                            rec['recommendations'].append(
+                                f"Consider GW{upcoming_dgws[0]['gw']} (DGW) but only {bench_dgw_count} bench players benefit"
+                            )
+                    else:
+                        rec['recommendations'].append(
+                            "Wait for a double gameweek to maximize returns"
+                        )
+                
+                rec['recommendations'].append(
+                    "💡 Pro tip: Best used when bench players have double gameweeks"
+                )
+                
+                chip_recommendations.append(rec)
+        
+        # Sort by priority
+        priority_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
+        chip_recommendations.sort(key=lambda x: priority_order.get(x['priority'], 3))
+        
+        # Output recommendations
+        for rec in chip_recommendations:
+            urgency_color = {
+                'HIGH': '🔴',
+                'MEDIUM': '🟡',
+                'LOW': '🟢'
+            }
+            
+            output.append(f"\n**{rec['chip']}** {urgency_color[rec['priority']]} {rec['priority']} PRIORITY")
+            for recommendation in rec['recommendations']:
+                output.append(f"├─ {recommendation}")
+        
+        # Add fixture overview
+        output.append("\n\n**Upcoming Fixture Overview:**")
+        for fw in fixtures_ahead[:6]:
+            status = []
+            if fw['is_dgw']:
+                status.append(f"DGW ({len(fw['dgw_teams'])} teams)")
+            if fw['is_bgw']:
+                status.append(f"BGW ({fw['teams_playing']} teams)")
+            
+            status_str = " - " + ", ".join(status) if status else ""
+            output.append(f"├─ GW{fw['gw']}: {fw['teams_playing']} teams playing{status_str}")
+        
+        return "\n".join(output)
+        
+    except Exception as e:
+        return f"Error analyzing chip strategy: {str(e)}"
+
+@mcp.tool()
+async def recommend_transfers() -> str:
+    """
+    Analyze your squad and recommend transfer strategy based on available free transfers,
+    upcoming fixtures, player form, and injury status. Considers the economics of points hits.
+    """
+    client = _get_client()
+    if not client: return "Error: Not authenticated. Please use login_to_fpl first."
+    
+    try:
+        entry_id = store.get_user_entry_id(client)
+        if not entry_id:
+            return "Error: Could not determine your entry ID."
+        
+        my_team = await client.get_my_team(entry_id)
+        picks = my_team['picks']
+        transfers = my_team['transfers']
+        
+        free_transfers = transfers['limit'] - transfers['made']
+        transfer_cost = transfers['cost']
+        
+        # Get all players
+        all_players = await client.get_players()
+        p_map = {p.id: p for p in all_players}
+        
+        # Get current gameweek
+        current_gw = store.get_current_gameweek()
+        if not current_gw:
+            return "Error: Could not determine current gameweek."
+        
+        current_gw_id = current_gw.id
+        
+        output = [
+            "**Transfer Recommendations**\n",
+            f"Free Transfers Available: {free_transfers}",
+            f"Transfer Cost: {transfer_cost} points per additional transfer",
+            f"Current Gameweek: {current_gw_id}\n"
+        ]
+        
+        # Analyze each player
+        player_priorities = []
+        
+        for pick in picks:
+            player = p_map.get(pick['element'])
+            if not player:
+                continue
+            
+            # Get player's next 5 fixtures
+            player_fixtures = []
+            for gw_num in range(current_gw_id, min(current_gw_id + 5, 39)):
+                gw_fixtures = [f for f in store.fixtures_data if f.event == gw_num]
+                
+                for fixture in gw_fixtures:
+                    if fixture.team_h == player.team or fixture.team_a == player.team:
+                        is_home = fixture.team_h == player.team
+                        difficulty = fixture.team_h_difficulty if is_home else fixture.team_a_difficulty
+                        
+                        player_fixtures.append({
+                            'gw': gw_num,
+                            'difficulty': difficulty,
+                            'is_home': is_home
+                        })
+            
+            # Calculate priority score (higher = more urgent to transfer out)
+            priority_score = 0
+            reasons = []
+            
+            # 1. Availability status (most important)
+            if player.status != 'a':
+                priority_score += 100
+                status_map = {'i': 'Injured', 'd': 'Doubtful', 's': 'Suspended', 'u': 'Unavailable'}
+                reasons.append(f"🚨 {status_map.get(player.status, 'Unavailable')}")
+            
+            # 2. Did not play last game
+            try:
+                summary = await client.get_element_summary(player.id)
+                history = summary.get('history', [])
+                if history:
+                    last_gw = history[-1]
+                    if last_gw['minutes'] == 0:
+                        priority_score += 50
+                        reasons.append("⚠️ DNP last game")
+            except:
+                pass
+            
+            # 3. Fixture difficulty (next 3 games)
+            if player_fixtures:
+                avg_difficulty = sum(f['difficulty'] for f in player_fixtures[:3]) / min(3, len(player_fixtures))
+                if avg_difficulty >= 4:
+                    priority_score += 30
+                    reasons.append(f"Hard fixtures (avg {avg_difficulty:.1f}/5)")
+                elif avg_difficulty >= 3.5:
+                    priority_score += 15
+                    reasons.append(f"Tough fixtures (avg {avg_difficulty:.1f}/5)")
+            
+            # 4. Poor form
+            try:
+                form = float(player.form) if player.form else 0
+                if form < 2:
+                    priority_score += 25
+                    reasons.append(f"Poor form ({form})")
+                elif form < 3:
+                    priority_score += 10
+                    reasons.append(f"Low form ({form})")
+            except:
+                pass
+            
+            # 5. Low minutes
+            try:
+                minutes = int(player.minutes) if hasattr(player, 'minutes') else 0
+                if minutes < 200:  # Less than ~2 full games
+                    priority_score += 20
+                    reasons.append(f"Low minutes ({minutes})")
+            except:
+                pass
+            
+            if priority_score > 0:
+                player_priorities.append({
+                    'player': player,
+                    'pick': pick,
+                    'priority_score': priority_score,
+                    'reasons': reasons,
+                    'fixtures': player_fixtures[:3]
+                })
+        
+        # Sort by priority
+        player_priorities.sort(key=lambda x: x['priority_score'], reverse=True)
+        
+        # Strategic recommendations based on free transfers
+        output.append("**Strategic Advice:**\n")
+        
+        if free_transfers == 0:
+            output.extend([
+                "🔴 **0 Free Transfers**",
+                "├─ Only take a hit (-4pts) if:",
+                "│  • Player is injured/suspended (unavailable)",
+                "│  • Replacement has a double gameweek",
+                "│  • Replacement expected to score 6+ more points (to break even)",
+                "└─ Otherwise, wait for next gameweek to bank a free transfer\n"
+            ])
+        elif free_transfers == 1:
+            output.extend([
+                "🟡 **1 Free Transfer**",
+                "├─ Consider banking if no urgent issues",
+                "├─ Use it if you have:",
+                "│  • Injured/suspended player",
+                "│  • Player with very poor fixtures",
+                "└─ Banking gives you 2 FT next week for more flexibility\n"
+            ])
+        else:  # 2 or more
+            output.extend([
+                "🟢 **2 Free Transfers**",
+                "├─ Good flexibility to fix issues",
+                "├─ Address top 2 priority problems",
+                "├─ Don't waste transfers - only make valuable moves",
+                "└─ Unused transfers don't roll over beyond 2\n"
+            ])
+        
+        # Show top transfer candidates
+        if player_priorities:
+            output.append("**Players to Consider Transferring Out:**\n")
+            
+            for i, pp in enumerate(player_priorities[:5], 1):
+                player = pp['player']
+                pick = pp['pick']
+                
+                bench_indicator = " [BENCH]" if pick['position'] > 11 else ""
+                
+                output.extend([
+                    f"**{i}. {player.web_name}** ({player.team_name} {player.position}) £{pick['selling_price']/10:.1f}m{bench_indicator}",
+                    f"├─ Priority Score: {pp['priority_score']} - {', '.join(pp['reasons'])}"
+                ])
+                
+                # Show next 3 fixtures
+                if pp['fixtures']:
+                    fixtures_str = []
+                    for f in pp['fixtures']:
+                        ha = "H" if f['is_home'] else "A"
+                        diff_str = "●" * f['difficulty'] + "○" * (5 - f['difficulty'])
+                        fixtures_str.append(f"GW{f['gw']}({ha}): {diff_str}")
+                    output.append(f"├─ Next fixtures: {' | '.join(fixtures_str)}")
+                
+                # Transfer recommendation
+                if pp['priority_score'] >= 100:
+                    output.append(f"└─ 🚨 **URGENT**: Transfer out immediately")
+                elif pp['priority_score'] >= 50:
+                    output.append(f"└─ ⚠️ **HIGH PRIORITY**: Strong transfer candidate")
+                elif pp['priority_score'] >= 30:
+                    output.append(f"└─ 🟡 **MEDIUM**: Consider if you have spare FT")
+                else:
+                    output.append(f"└─ 🟢 **LOW**: Monitor, not urgent")
+                
+                output.append("")
+        else:
+            output.append("✅ **No immediate transfer concerns!**\n")
+            output.append("Your squad looks healthy. Consider banking your free transfer.\n")
+        
+        # Points hit economics
+        output.extend([
+            "\n**Points Hit Economics:**",
+            "├─ Each additional transfer costs 4 points",
+            "├─ Replacement must score 6+ more points to break even:",
+            "│  • 4 points to recover the hit",
+            "│  • 2+ points to actually gain value",
+            "└─ Only take hits for injured players or exceptional opportunities\n"
+        ])
+        
+        # Timing advice
+        output.extend([
+            "**Timing Considerations:**",
+            "├─ Make transfers early in the week to monitor price changes",
+            "├─ But wait for Friday press conferences for injury news",
+            "├─ Check lineup predictions before finalizing",
+            "└─ Consider banking transfers for future flexibility"
+        ])
+        
+        return "\n".join(output)
+        
+    except Exception as e:
+        return f"Error analyzing transfers: {str(e)}"
