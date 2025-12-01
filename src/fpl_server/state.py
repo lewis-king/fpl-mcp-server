@@ -455,6 +455,80 @@ class SessionStore:
         if not client.user_info:
             return None
         return client.user_info.get('player', {}).get('entry')
+    
+    def enrich_gameweek_history(self, history: list[dict]) -> list[dict]:
+        """
+        Enrich gameweek history data with friendly names for teams.
+        Adds 'opponent_team_name' and 'opponent_team_short' fields.
+        
+        Args:
+            history: List of gameweek history dicts from element-summary
+            
+        Returns:
+            Enriched history with team names added
+        """
+        if not self.bootstrap_data:
+            return history
+        
+        enriched = []
+        for gw in history:
+            enriched_gw = gw.copy()
+            
+            # Add opponent team names
+            opponent_id = gw.get('opponent_team')
+            if opponent_id:
+                opponent = self.get_team_by_id(opponent_id)
+                if opponent:
+                    enriched_gw['opponent_team_name'] = opponent['name']
+                    enriched_gw['opponent_team_short'] = opponent['short_name']
+            
+            enriched.append(enriched_gw)
+    
+    def enrich_fixtures(self, fixtures: list) -> list:
+        """
+        Enrich fixture data with friendly team names.
+        Adds 'team_h_name', 'team_h_short', 'team_a_name', 'team_a_short' fields.
+        
+        Args:
+            fixtures: List of FixtureData objects or fixture dicts
+            
+        Returns:
+            List of enriched fixture dicts
+        """
+        if not self.bootstrap_data:
+            return fixtures
+        
+        enriched = []
+        for fixture in fixtures:
+            # Convert to dict if it's a FixtureData object
+            if hasattr(fixture, 'model_dump'):
+                fixture_dict = fixture.model_dump()
+            elif hasattr(fixture, '__dict__'):
+                fixture_dict = fixture.__dict__.copy()
+            else:
+                fixture_dict = fixture.copy() if isinstance(fixture, dict) else {}
+            
+            # Add home team names
+            team_h_id = fixture_dict.get('team_h') if isinstance(fixture_dict, dict) else getattr(fixture, 'team_h', None)
+            if team_h_id:
+                team_h = self.get_team_by_id(team_h_id)
+                if team_h:
+                    fixture_dict['team_h_name'] = team_h['name']
+                    fixture_dict['team_h_short'] = team_h['short_name']
+            
+            # Add away team names
+            team_a_id = fixture_dict.get('team_a') if isinstance(fixture_dict, dict) else getattr(fixture, 'team_a', None)
+            if team_a_id:
+                team_a = self.get_team_by_id(team_a_id)
+                if team_a:
+                    fixture_dict['team_a_name'] = team_a['name']
+                    fixture_dict['team_a_short'] = team_a['short_name']
+            
+            enriched.append(fixture_dict)
+        
+        return enriched
+        
+        return enriched
 
 # Global Instance
 store = SessionStore()

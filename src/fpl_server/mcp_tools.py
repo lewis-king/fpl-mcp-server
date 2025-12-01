@@ -911,6 +911,13 @@ async def get_player_summary(player_name: str) -> str:
         # Fetch detailed summary from API
         summary_data = await client.get_element_summary(player_id)
         
+        # Enrich history and fixtures with team names
+        history = summary_data.get('history', [])
+        history = store.enrich_gameweek_history(history)
+        
+        fixtures = summary_data.get('fixtures', [])
+        fixtures = store.enrich_fixtures(fixtures)
+        
         output = [
             f"**{player.web_name}** ({player.first_name} {player.second_name})",
             f"Team: {player.team_name} | Position: {player.position} | Price: £{player.now_cost/10:.1f}m",
@@ -918,13 +925,10 @@ async def get_player_summary(player_name: str) -> str:
         ]
         
         # Upcoming Fixtures
-        fixtures = summary_data.get('fixtures', [])
         if fixtures:
             output.append(f"**Upcoming Fixtures ({len(fixtures)}):**")
             for fixture in fixtures[:5]:
-                opponent_id = fixture['team_h'] if not fixture['is_home'] else fixture['team_a']
-                opponent = store.get_team_by_id(opponent_id)
-                opponent_name = opponent['short_name'] if opponent else f"Team {opponent_id}"
+                opponent_name = fixture.get('team_h_short') if not fixture['is_home'] else fixture.get('team_a_short', 'Unknown')
                 home_away = "H" if fixture['is_home'] else "A"
                 difficulty = "●" * fixture['difficulty']
                 
@@ -935,14 +939,12 @@ async def get_player_summary(player_name: str) -> str:
             output.append("")
         
         # Recent Gameweek History
-        history = summary_data.get('history', [])
         if history:
             recent_history = history[-5:]
             output.append(f"**Recent Performance (Last {len(recent_history)} GWs):**")
             
             for gw in recent_history:
-                opponent = store.get_team_by_id(gw['opponent_team'])
-                opponent_name = opponent['short_name'] if opponent else f"Team {gw['opponent_team']}"
+                opponent_name = gw.get('opponent_team_short', 'Unknown')
                 home_away = "H" if gw['was_home'] else "A"
                 
                 output.append(
@@ -978,6 +980,288 @@ async def get_player_summary(player_name: str) -> str:
         return "\n".join(output)
     except Exception as e:
         return f"Error fetching player summary: {str(e)}"
+@mcp.tool()
+async def analyze_squad_recent_performance(num_gameweeks: int = 5) -> str:
+    """
+    Analyze recent gameweek performance for all players in your current squad.
+    Shows detailed stats from the last N gameweeks to identify underperforming players
+    who might be candidates for transfer, and inform players who are performing well.
+    
+    Args:
+        num_gameweeks: Number of recent gameweeks to analyze (default: 5)
+    
+    Returns:
+        Detailed analysis of each squad player's recent form with transfer recommendations
+    """
+    client = _get_client()
+    if not client: return "Error: Not authenticated. Please use login_to_fpl first."
+    
+    try:
+        entry_id = store.get_user_entry_id(client)
+        if not entry_id:
+            return "Error: Could not determine your entry ID."
+        
+        # Get current squad
+        my_team = await client.get_my_team(entry_id)
+        picks = my_team['picks']
+        
+        # Get all players for price info
+        all_players = await client.get_players()
+        p_map = {p.id: p for p in all_players}
+        
+        output = [
+            f"**Squad Performance Analysis (Last {num_gameweeks} Gameweeks)**\n",
+            f"Bank: £{my_team['transfers']['bank']/10:.1f}m\n"
+        ]
+        
+        # Analyze each player
+        player_analyses = []
+        
+        for pick in picks:
+            element_id = pick['element']
+            player = p_map.get(element_id)
+            if not player:
+                continue
+            
+            # Fetch detailed player summary
+            try:
+                summary = await client.get_element_summary(element_id)
+                history = summary.get('history', [])
+                
+                # Enrich history with team names
+                history = store.enrich_gameweek_history(history)
+                
+                if not history:
+                    player_analyses.append({
+                        'player': player,
+                        'pick': pick,
+                        'avg_points': 0,
+                        'avg_minutes': 0,
+                        'total_points': 0,
+                        'games_played': 0,
+                        'recent_form': 'No data'
+                    })
+                    continue
+                
+                # Get last N gameweeks
+                recent_gws = history[-num_gameweeks:]
+                
+                # Calculate stats
+                total_points = sum(gw['total_points'] for gw in recent_gws)
+                total_minutes = sum(gw['minutes'] for gw in recent_gws)
+                games_played = len([gw for gw in recent_gws if gw['minutes'] > 0])
+                avg_points = total_points / len(recent_gws) if recent_gws else 0
+                avg_minutes = total_minutes / len(recent_gws) if recent_gws else 0
+                
+                # Calculate recent form trend (last 3 vs previous games)
+                if len(recent_gws) >= 3:
+                    last_3 = recent_gws[-3:]
+                    prev_games = recent_gws[:-3] if len(recent_gws) > 3 else []
+                    
+                    last_3_avg = sum(gw['total_points'] for gw in last_3) / 3
+                    prev_avg = sum(gw['total_points'] for gw in prev_games) / len(prev_games) if prev_games else last_3_avg
+                    
+                    if last_3_avg > prev_avg * 1.2:
+                        form_trend = "📈 Improving"
+                    elif last_3_avg < prev_avg * 0.8:
+                        form_trend = "📉 Declining"
+                    else:
+                        form_trend = "➡️ Stable"
+                else:
+                    form_trend = "➡️ Stable"
+                
+                # Calculate transfer trends from recent gameweeks
+                recent_transfers_balance = sum(gw.get('transfers_balance', 0) for gw in recent_gws)
+                last_gw_transfers = recent_gws[-1].get('transfers_balance', 0) if recent_gws else 0
+                
+                # Determine transfer sentiment
+                if recent_transfers_balance < -100000:
+                    transfer_sentiment = "🔴 Heavy selling"
+                elif recent_transfers_balance < -50000:
+                    transfer_sentiment = "🟠 Moderate selling"
+                elif recent_transfers_balance < -10000:
+                    transfer_sentiment = "🟡 Light selling"
+                elif recent_transfers_balance > 100000:
+                    transfer_sentiment = "🟢 Heavy buying"
+                elif recent_transfers_balance > 50000:
+                    transfer_sentiment = "🟢 Moderate buying"
+                elif recent_transfers_balance > 10000:
+                    transfer_sentiment = "🟢 Light buying"
+                else:
+                    transfer_sentiment = "⚪ Stable"
+                
+                player_analyses.append({
+                    'player': player,
+                    'pick': pick,
+                    'avg_points': avg_points,
+                    'avg_minutes': avg_minutes,
+                    'total_points': total_points,
+                    'games_played': games_played,
+                    'recent_form': form_trend,
+                    'recent_gws': recent_gws,
+                    'transfers_balance': recent_transfers_balance,
+                    'last_gw_transfers': last_gw_transfers,
+                    'transfer_sentiment': transfer_sentiment
+                })
+                
+            except Exception as e:
+                logger.error(f"Error fetching summary for player {element_id}: {e}")
+                continue
+        
+        # Sort by average points (ascending to show worst performers first)
+        player_analyses.sort(key=lambda x: x['avg_points'])
+        
+        # Categorize players
+        underperformers = []
+        solid_performers = []
+        star_performers = []
+        
+        for analysis in player_analyses:
+            avg_pts = analysis['avg_points']
+            if avg_pts < 2.5:
+                underperformers.append(analysis)
+            elif avg_pts < 5:
+                solid_performers.append(analysis)
+            else:
+                star_performers.append(analysis)
+        
+        # Output underperformers (transfer candidates)
+        if underperformers:
+            output.append(f"**🚨 UNDERPERFORMERS - Transfer Candidates ({len(underperformers)} players)**\n")
+            for analysis in underperformers:
+                player = analysis['player']
+                pick = analysis['pick']
+                role = " (C)" if pick['is_captain'] else " (VC)" if pick['is_vice_captain'] else ""
+                bench = " [BENCH]" if pick['position'] > 11 else ""
+                
+                # Get last gameweek info
+                last_gw = analysis['recent_gws'][-1] if analysis.get('recent_gws') else None
+                last_gw_str = ""
+                if last_gw:
+                    opp_name = last_gw.get('opponent_team_short', f"Team {last_gw.get('opponent_team', '?')}")
+                    ha = "H" if last_gw['was_home'] else "A"
+                    last_gw_str = f" | Last GW: {last_gw['total_points']}pts, {last_gw['minutes']}min vs {opp_name}({ha})"
+                    
+                    # Add warning if didn't play last game
+                    if last_gw['minutes'] == 0:
+                        last_gw_str += " ⚠️ DNP"
+                
+                # Format transfer balance
+                transfers_str = f"{analysis['transfers_balance']:+,}" if analysis['transfers_balance'] != 0 else "0"
+                
+                output.extend([
+                    f"\n**{player.web_name}** ({player.team_name} {player.position}) £{pick['selling_price']/10:.1f}m{role}{bench}",
+                    f"├─ Recent Form: {analysis['recent_form']}{last_gw_str}",
+                    f"├─ Avg Points/Game: {analysis['avg_points']:.1f} (Last {num_gameweeks} GWs)",
+                    f"├─ Total Points: {analysis['total_points']} in {analysis['games_played']} games",
+                    f"├─ Avg Minutes: {analysis['avg_minutes']:.0f}/90",
+                    f"├─ Community Sentiment: {analysis['transfer_sentiment']} ({transfers_str} net transfers)",
+                ])
+                
+                # Show last 3 gameweeks detail
+                if analysis.get('recent_gws'):
+                    last_3 = analysis['recent_gws'][-3:]
+                    gw_details = []
+                    for gw in last_3:
+                        opp_name = gw.get('opponent_team_short', f"Team {gw.get('opponent_team', '?')}")
+                        ha = "H" if gw['was_home'] else "A"
+                        mins_str = f", {gw['minutes']}min" if gw['minutes'] < 90 else ""
+                        gw_details.append(f"GW{gw['round']}: {gw['total_points']}pts{mins_str} vs {opp_name}({ha})")
+                    output.append(f"├─ Last 3 GWs: {' | '.join(gw_details)}")
+                
+                # Add recommendation with last game context and transfer sentiment
+                recommendations = []
+                
+                if last_gw and last_gw['minutes'] == 0:
+                    recommendations.append("Did not play last game - check injury/rotation status urgently")
+                elif analysis['avg_minutes'] < 60:
+                    recommendations.append("Low minutes - consider transferring out")
+                elif analysis['avg_points'] < 2:
+                    recommendations.append("Poor returns - strong transfer candidate")
+                else:
+                    recommendations.append("Underperforming - monitor closely")
+                
+                # Add transfer sentiment context
+                if analysis['transfers_balance'] < -50000:
+                    recommendations.append(f"Community is heavily selling ({analysis['transfers_balance']:,} net)")
+                elif analysis['transfers_balance'] < -10000:
+                    recommendations.append(f"Community losing confidence ({analysis['transfers_balance']:,} net)")
+                
+                rec_icon = "🚨" if (last_gw and last_gw['minutes'] == 0) or analysis['transfers_balance'] < -50000 else "⚠️"
+                output.append(f"└─ {rec_icon} **RECOMMENDATION**: {' | '.join(recommendations)}")
+        
+        # Output solid performers
+        if solid_performers:
+            output.append(f"\n\n**✅ SOLID PERFORMERS - Keep ({len(solid_performers)} players)**\n")
+            for analysis in solid_performers:
+                player = analysis['player']
+                pick = analysis['pick']
+                role = " (C)" if pick['is_captain'] else " (VC)" if pick['is_vice_captain'] else ""
+                
+                # Get last game info
+                last_gw = analysis['recent_gws'][-1] if analysis.get('recent_gws') else None
+                last_gw_str = ""
+                if last_gw:
+                    last_gw_str = f" | Last: {last_gw['total_points']}pts"
+                    if last_gw['minutes'] == 0:
+                        last_gw_str += " ⚠️ DNP"
+                    elif last_gw['minutes'] < 60:
+                        last_gw_str += f" ({last_gw['minutes']}min)"
+                
+                # Add transfer sentiment if significant
+                sentiment_str = ""
+                if abs(analysis['transfers_balance']) > 10000:
+                    sentiment_str = f" | {analysis['transfer_sentiment']}"
+                
+                output.append(
+                    f"├─ {player.web_name} ({player.team_name} {player.position}): "
+                    f"{analysis['avg_points']:.1f} pts/game | {analysis['recent_form']}{last_gw_str}{sentiment_str}"
+                )
+        
+        # Output star performers
+        if star_performers:
+            output.append(f"\n\n**⭐ STAR PERFORMERS - Essential ({len(star_performers)} players)**\n")
+            for analysis in star_performers:
+                player = analysis['player']
+                pick = analysis['pick']
+                role = " (C)" if pick['is_captain'] else " (VC)" if pick['is_vice_captain'] else ""
+                
+                # Get last game info
+                last_gw = analysis['recent_gws'][-1] if analysis.get('recent_gws') else None
+                last_gw_str = ""
+                if last_gw:
+                    last_gw_str = f" | Last: {last_gw['total_points']}pts"
+                    if last_gw['minutes'] == 0:
+                        last_gw_str += " ⚠️ DNP"
+                    elif last_gw['minutes'] < 60:
+                        last_gw_str += f" ({last_gw['minutes']}min)"
+                
+                # Add transfer sentiment if significant
+                sentiment_str = ""
+                if abs(analysis['transfers_balance']) > 10000:
+                    sentiment_str = f" | {analysis['transfer_sentiment']}"
+                
+                output.append(
+                    f"├─ {player.web_name} ({player.team_name} {player.position}): "
+                    f"{analysis['avg_points']:.1f} pts/game | {analysis['recent_form']}{last_gw_str}{sentiment_str}{role}"
+                )
+        
+        # Summary recommendations
+        output.extend([
+            "\n\n**📊 SUMMARY**",
+            f"├─ Underperformers: {len(underperformers)} players averaging <2.5 pts/game",
+            f"├─ Solid Performers: {len(solid_performers)} players averaging 2.5-5 pts/game",
+            f"├─ Star Performers: {len(star_performers)} players averaging >5 pts/game",
+        ])
+        
+        if underperformers:
+            output.append(f"\n**💡 TRANSFER PRIORITY**: Focus on replacing {underperformers[0]['player'].web_name} first")
+        
+        return "\n".join(output)
+        
+    except Exception as e:
+        return f"Error analyzing squad performance: {str(e)}"
+
 
 @mcp.tool()
 async def get_my_performance() -> str:
@@ -1316,27 +1600,27 @@ async def get_fixtures_for_gameweek(gameweek: int) -> str:
         if not gw_fixtures:
             return f"No fixtures found for gameweek {gameweek}"
         
+        # Enrich fixtures with team names
+        gw_fixtures_enriched = store.enrich_fixtures(gw_fixtures)
+        
         output = [
-            f"**Gameweek {gameweek} Fixtures ({len(gw_fixtures)} matches)**\n"
+            f"**Gameweek {gameweek} Fixtures ({len(gw_fixtures_enriched)} matches)**\n"
         ]
         
-        gw_fixtures_sorted = sorted(gw_fixtures, key=lambda x: x.kickoff_time or "")
+        gw_fixtures_sorted = sorted(gw_fixtures_enriched, key=lambda x: x.get('kickoff_time') or "")
         
         for fixture in gw_fixtures_sorted:
-            team_h = store.get_team_by_id(fixture.team_h)
-            team_a = store.get_team_by_id(fixture.team_a)
+            home_name = fixture.get('team_h_short', 'Unknown')
+            away_name = fixture.get('team_a_short', 'Unknown')
             
-            home_name = team_h['short_name'] if team_h else f"Team {fixture.team_h}"
-            away_name = team_a['short_name'] if team_a else f"Team {fixture.team_a}"
-            
-            status = "✓" if fixture.finished else "○"
-            score = f"{fixture.team_h_score}-{fixture.team_a_score}" if fixture.finished else "vs"
-            kickoff = fixture.kickoff_time[:16] if fixture.kickoff_time else "TBD"
+            status = "✓" if fixture.get('finished') else "○"
+            score = f"{fixture.get('team_h_score')}-{fixture.get('team_a_score')}" if fixture.get('finished') else "vs"
+            kickoff = fixture.get('kickoff_time', '')[:16] if fixture.get('kickoff_time') else "TBD"
             
             output.append(
                 f"{status} {home_name} {score} {away_name} | "
                 f"Kickoff: {kickoff} | "
-                f"Difficulty: H:{fixture.team_h_difficulty} A:{fixture.team_a_difficulty}"
+                f"Difficulty: H:{fixture.get('team_h_difficulty')} A:{fixture.get('team_a_difficulty')}"
             )
         
         return "\n".join(output)
@@ -1389,7 +1673,9 @@ async def analyze_team_fixtures(team_name: str, num_gameweeks: int = 5) -> str:
         if not team_fixtures:
             return f"No upcoming fixtures found for {team.name}"
         
-        team_fixtures_sorted = sorted(team_fixtures, key=lambda x: x.event or 999)
+        # Enrich fixtures with team names
+        team_fixtures_enriched = store.enrich_fixtures(team_fixtures)
+        team_fixtures_sorted = sorted(team_fixtures_enriched, key=lambda x: x.get('event') or 999)
         
         output = [
             f"**{team.name} ({team.short_name}) - Next {len(team_fixtures_sorted)} Fixtures**\n"
@@ -1397,20 +1683,18 @@ async def analyze_team_fixtures(team_name: str, num_gameweeks: int = 5) -> str:
         
         total_difficulty = 0
         for fixture in team_fixtures_sorted:
-            is_home = fixture.team_h == team.id
-            opponent_id = fixture.team_a if is_home else fixture.team_h
-            opponent = store.get_team_by_id(opponent_id)
-            opponent_name = opponent['name'] if opponent else f"Team {opponent_id}"
+            is_home = fixture.get('team_h') == team.id
+            opponent_name = fixture.get('team_a_name') if is_home else fixture.get('team_h_name', 'Unknown')
             
-            difficulty = fixture.team_h_difficulty if is_home else fixture.team_a_difficulty
+            difficulty = fixture.get('team_h_difficulty') if is_home else fixture.get('team_a_difficulty')
             total_difficulty += difficulty
             
             difficulty_str = "●" * difficulty + "○" * (5 - difficulty)
             home_away = "H" if is_home else "A"
-            kickoff = fixture.kickoff_time[:10] if fixture.kickoff_time else "TBD"
+            kickoff = fixture.get('kickoff_time', '')[:10] if fixture.get('kickoff_time') else "TBD"
             
             output.append(
-                f"GW{fixture.event}: vs {opponent_name:20s} ({home_away}) | "
+                f"GW{fixture.get('event')}: vs {opponent_name:20s} ({home_away}) | "
                 f"{difficulty_str} ({difficulty}/5) | {kickoff}"
             )
         

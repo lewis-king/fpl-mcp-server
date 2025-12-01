@@ -33,7 +33,7 @@ LOGIN_HTML = """
 <body>
     <div class="container">
         <h2>FPL Connection</h2>
-        <p>Enter your FPL credentials. Your entry will be automatically detected.</p>
+        <p>Enter your FPL credentials. Your team and leagues will automatically be detected.</p>
         <form action="/auth/submit/{request_id}" method="post" onsubmit="showLoader()">
             <input type="email" name="email" placeholder="Email" required>
             <input type="password" name="password" placeholder="Password" required>
