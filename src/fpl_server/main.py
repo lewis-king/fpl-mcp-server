@@ -10,7 +10,10 @@ try:
     import uvicorn
     from .web import app
     from .mcp_tools import mcp
-    sys.stderr.write("DEBUG: Imports successful.\n")
+    # Import resources and prompts to register them with the MCP server
+    from . import mcp_resources
+    from . import mcp_prompts
+    sys.stderr.write("DEBUG: Imports successful (tools, resources, prompts).\n")
     sys.stderr.flush()
 except Exception as e:
     sys.stderr.write(f"CRITICAL IMPORT ERROR: {e}\n")

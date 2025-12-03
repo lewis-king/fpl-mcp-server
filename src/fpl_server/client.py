@@ -127,8 +127,8 @@ class FPLClient:
         return await self._request("GET", "me/")
 
     async def get_players(self) -> List[Player]:
-        """Get all players using cached bootstrap data"""
-        # Use cached data if available
+        """Get all players using in-memory bootstrap data"""
+        # Use in-memory data if available
         if self._store and self._store.bootstrap_data:
             data = self._store.bootstrap_data
             teams = {t.id: t.name for t in data.teams}
@@ -154,8 +154,8 @@ class FPLClient:
                 players.append(player)
             return players
         
-        # Fallback to API if cached data not available
-        logger.warning("Bootstrap data not cached, fetching from API")
+        # Fallback to API if in-memory data not available
+        logger.warning("Bootstrap data not loaded, fetching from API")
         data = await self.get_bootstrap_data()
         teams = {t['id']: t['name'] for t in data['teams']}
         types = {t['id']: t['singular_name_short'] for t in data['element_types']}

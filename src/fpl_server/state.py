@@ -1,14 +1,11 @@
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass
 import time
-import json
 import logging
 import asyncio
-from pathlib import Path
 from difflib import SequenceMatcher
 from .client import FPLClient
 from .models import BootstrapData, ElementData, EventData, FixtureData
-from .cache import DataCache
 
 logger = logging.getLogger("fpl_state")
 
@@ -27,54 +24,45 @@ class SessionStore:
         # Maps session_id (given to LLM) -> Authenticated FPLClient
         self.active_sessions: Dict[str, FPLClient] = {}
         
-        # Cached bootstrap data loaded at startup
+        # Bootstrap data loaded on-demand from API
         self.bootstrap_data: Optional[BootstrapData] = None
         
-        # Cached fixtures data
+        # Fixtures data loaded on-demand from API
         self.fixtures_data: Optional[List[FixtureData]] = None
         
         # Player name lookup maps for intelligent searching
         # Maps normalized name -> list of player IDs (handles duplicates)
         self.player_name_map: Dict[str, List[int]] = {}
         self.player_id_map: Dict[int, ElementData] = {}
-        
-        # Cache manager with 4-hour TTL
-        self.cache = DataCache(cache_dir="data", ttl_hours=4)
-        
-        self._load_bootstrap_data()
-        self._load_fixtures_data()
 
     def _normalize_name(self, name: str) -> str:
         """Normalize a name for matching: lowercase, remove extra spaces"""
         return " ".join(name.lower().strip().split())
     
-    def _load_bootstrap_data(self):
-        """Load bootstrap data from cache or fetch from API if expired"""
-        try:
-            # Always try to load from cache first (even if expired)
-            raw_data = self.cache.get("bootstrap_data.json", ignore_expiry=True)
-            if raw_data:
+    async def ensure_bootstrap_data(self, client: FPLClient):
+        """Ensure bootstrap data is loaded, fetching from API if needed"""
+        if self.bootstrap_data is None:
+            try:
+                logger.info("Fetching bootstrap data from API...")
+                raw_data = await client.get_bootstrap_static()
                 self.bootstrap_data = BootstrapData(**raw_data)
                 self._build_player_indices()
-                cache_info = self.cache.get_cache_info('bootstrap_data.json')
-                logger.info(
-                    f"Loaded {len(self.bootstrap_data.elements)} players from cache. "
-                    f"Cache info: {cache_info}"
-                )
-                
-                # If cache is expired, log a warning but continue using it
-                if self.cache.is_expired("bootstrap_data.json"):
-                    logger.warning("Bootstrap cache is expired but will be used. Consider refreshing.")
-                
-                return
-            
-            # No cache available at all - this is a problem
-            logger.error("No bootstrap cache found. Please run the server to populate cache.")
-            self.bootstrap_data = None
-                
-        except Exception as e:
-            logger.error(f"Failed to load bootstrap data: {e}")
-            self.bootstrap_data = None
+                logger.info(f"Loaded {len(self.bootstrap_data.elements)} players from API")
+            except Exception as e:
+                logger.error(f"Failed to load bootstrap data: {e}")
+                raise
+    
+    async def ensure_fixtures_data(self, client: FPLClient):
+        """Ensure fixtures data is loaded, fetching from API if needed"""
+        if self.fixtures_data is None:
+            try:
+                logger.info("Fetching fixtures data from API...")
+                raw_data = await client.get_fixtures()
+                self.fixtures_data = [FixtureData(**fixture) for fixture in raw_data]
+                logger.info(f"Loaded {len(self.fixtures_data)} fixtures from API")
+            except Exception as e:
+                logger.error(f"Failed to load fixtures data: {e}")
+                raise
     
     def _build_player_indices(self):
         """Build player name and ID indices from bootstrap data"""
@@ -126,39 +114,13 @@ class SessionStore:
                 if element.id not in self.player_name_map[first_web_key]:
                     self.player_name_map[first_web_key].append(element.id)
         
-        logger.info(
-            f"Loaded {len(self.bootstrap_data.elements)} players, "
-            f"{len(self.bootstrap_data.teams)} teams, "
-            f"{len(self.bootstrap_data.events)} gameweeks. "
-            f"Built name index with {len(self.player_name_map)} keys."
-        )
-    
-    def _load_fixtures_data(self):
-        """Load fixtures data from cache or fetch from API if expired"""
-        try:
-            # Always try to load from cache first (even if expired)
-            raw_data = self.cache.get("fixtures.json", ignore_expiry=True)
-            if raw_data:
-                self.fixtures_data = [FixtureData(**fixture) for fixture in raw_data]
-                cache_info = self.cache.get_cache_info('fixtures.json')
-                logger.info(
-                    f"Loaded {len(self.fixtures_data)} fixtures from cache. "
-                    f"Cache info: {cache_info}"
-                )
-                
-                # If cache is expired, log a warning but continue using it
-                if self.cache.is_expired("fixtures.json"):
-                    logger.warning("Fixtures cache is expired but will be used. Consider refreshing.")
-                
-                return
-            
-            # No cache available at all - this is a problem
-            logger.error("No fixtures cache found. Please run the server to populate cache.")
-            self.fixtures_data = None
-                
-        except Exception as e:
-            logger.error(f"Failed to load fixtures data: {e}")
-            self.fixtures_data = None
+        if self.bootstrap_data:
+            logger.info(
+                f"Built player indices: {len(self.bootstrap_data.elements)} players, "
+                f"{len(self.bootstrap_data.teams)} teams, "
+                f"{len(self.bootstrap_data.events)} gameweeks. "
+                f"Name index has {len(self.player_name_map)} keys."
+            )
 
     def create_login_request(self, request_id: str):
         self.pending_logins[request_id] = PendingLogin(created_at=time.time())
